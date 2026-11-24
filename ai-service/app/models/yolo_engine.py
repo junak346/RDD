@@ -77,7 +77,12 @@ class YoloEngine(DetectionEngine):
         try:
             import torch  # noqa: PLC0415
 
-            return "cuda:0" if torch.cuda.is_available() else "cpu"
+            if torch.cuda.is_available():
+                return "cuda:0"
+            mps = getattr(getattr(torch, "backends", None), "mps", None)
+            if mps is not None and mps.is_available():
+                return "mps"
+            return "cpu"
         except ImportError:
             return "cpu"
 

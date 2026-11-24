@@ -40,9 +40,9 @@ export function severityMeta(severity: string | null | undefined): SeverityMeta 
 /** Class → color mapping consistent with ai-service/app/classes.json. */
 export const CLASS_COLORS: Record<string, string> = {
   pothole: '#ef4444',
-  crack: '#f59e0b',
-  surface_damage: '#8b5cf6',
-  other: '#64748b',
+  longitudinal_crack: '#f59e0b',
+  transverse_crack: '#eab308',
+  alligator_crack: '#8b5cf6',
 };
 
 export function classColor(className: string): string {

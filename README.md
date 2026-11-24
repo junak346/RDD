@@ -132,6 +132,16 @@ cd backend && npm run dev   # reads ../.env — or: DATA_MODE=demo DEMO_SEED=tru
 cd frontend && npm run dev  # → http://localhost:5173
 ```
 
+The frontend proxies `/api` to the backend port configured by `PORT` in the
+repository-root `.env` (default `5000`). Set `VITE_API_URL` in the shell to
+override the proxy target. If another app is already using port `5173`, start
+the frontend on a free port, for example:
+
+```bash
+cd frontend && npm run dev -- --host 127.0.0.1 --port 5174 --strictPort
+# → http://localhost:5174
+```
+
 **No MongoDB available?** Run the backend with `DATA_MODE=demo DEMO_SEED=true`:
 an explicitly-labelled in-memory demo store (every API response is tagged
 `meta.dataMode: "demo"` and the UI shows a permanent DEMO MODE banner). Demo

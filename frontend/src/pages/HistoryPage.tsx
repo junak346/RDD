@@ -94,9 +94,9 @@ export function HistoryPage() {
             options={[
               { value: '', label: 'All types' },
               { value: 'pothole', label: 'Pothole' },
-              { value: 'crack', label: 'Crack' },
-              { value: 'surface_damage', label: 'Surface Damage' },
-              { value: 'other', label: 'Other' },
+              { value: 'longitudinal_crack', label: 'Longitudinal Crack' },
+              { value: 'transverse_crack', label: 'Transverse Crack' },
+              { value: 'alligator_crack', label: 'Alligator Crack' },
             ]}
           />
           <Select
