@@ -15,7 +15,8 @@ import { DetectionRecord, Severity } from '../../types/domain';
 const DEMO_USER = {
   name: 'Demo Inspector',
   email: 'demo@rdd.local',
-  passwordHash: '$2a$12$C6UzMDM.H6dfI/f/IKcEeO7ZBlOZ9pXKLnDX9d/B3cZJxTB5vQKle', // "demo1234"
+  // bcrypt("demo1234", cost 12) — demo-mode convenience account only.
+  passwordHash: '$2b$12$9G5R.uMBa07a9IiCAwm1mOeAYSsmxEEyRN.rA8zt6PS2CEtkPdwdi',
   role: 'user' as const,
 };
 

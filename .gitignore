@@ -13,9 +13,8 @@ build/
 .env.*
 !.env.example
 
-# Runtime data (uploaded images, local DB data)
-uploads/*
-!uploads/.gitkeep
+# Runtime data (uploaded images, local DB data) — matches at any depth
+uploads/
 mongo-data/
 
 # AI model weights (large binaries are supplied separately, see docs/AI_MODEL.md)

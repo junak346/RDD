@@ -8,6 +8,9 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
+    // Dev-only: accept proxied preview hosts (production is served by nginx,
+    // which does not use this allowlist).
+    allowedHosts: true,
     proxy: {
       '/api': {
         target: process.env.VITE_API_URL || 'http://127.0.0.1:5000',
@@ -18,6 +21,7 @@ export default defineConfig({
   preview: {
     host: '0.0.0.0',
     port: 4173,
+    allowedHosts: true,
     proxy: {
       '/api': {
         target: process.env.VITE_API_URL || 'http://127.0.0.1:5000',
