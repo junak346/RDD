@@ -1,0 +1,51 @@
+# Dependencies
+node_modules/
+.venv/
+venv/
+
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Environment / secrets — never commit real .env files
+.env
+.env.*
+!.env.example
+
+# Runtime data (uploaded images, local DB data)
+uploads/*
+!uploads/.gitkeep
+mongo-data/
+
+# AI model weights (large binaries are supplied separately, see docs/AI_MODEL.md)
+*.pt
+*.pth
+*.onnx
+*.engine
+*.tflite
+ai-service/models/*
+!ai-service/models/.gitkeep
+
+# Logs
+*.log
+logs/
+
+# Test / coverage artifacts
+coverage/
+.pytest_cache/
+.ruff_cache/
+__pycache__/
+*.pyc
+*.pyo
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+
+# Misc
+.cache/
+tmp/
