@@ -1,0 +1,12 @@
+# Real machine-learning stack for YOLO inference (optional but required for
+# AI_MODE=real). Install with:
+#   pip install -r requirements.txt -r requirements-ml.txt
+#
+# NOTE: torch pulls in large binary wheels. For a smaller CPU-only install use
+# the official CPU index first, e.g.:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# then install the rest of this file.
+torch>=2.2
+torchvision>=0.17
+ultralytics>=8.2,<9.0
+opencv-python-headless>=4.9
