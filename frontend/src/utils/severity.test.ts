@@ -11,10 +11,11 @@ describe('severity metadata', () => {
     expect(severityMeta('catastrophic')).toBeNull();
   });
 
-  it('keeps class colors consistent with the AI annotation palette', () => {
+  it('keeps class colors consistent with the RDD2022 AI annotation palette', () => {
     expect(classColor('pothole')).toBe('#ef4444');
-    expect(classColor('crack')).toBe('#f59e0b');
-    expect(classColor('surface_damage')).toBe('#8b5cf6');
+    expect(classColor('longitudinal_crack')).toBe('#f59e0b');
+    expect(classColor('transverse_crack')).toBe('#eab308');
+    expect(classColor('alligator_crack')).toBe('#8b5cf6');
     expect(classColor('unknown-class')).toBe('#38bdf8');
   });
 });

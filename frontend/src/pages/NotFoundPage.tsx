@@ -10,13 +10,10 @@ export function NotFoundPage() {
       <p className="mt-2 max-w-md text-sm text-slate-500">
         The page you are looking for does not exist or may have been moved.
       </p>
-      <div className="mt-6 flex gap-3">
-        <Link to="/">
-          <Button>Back to home</Button>
-        </Link>
-        <Link to="/app">
-          <Button variant="outline">Open dashboard</Button>
-        </Link>
+      <div className="mt-6 flex flex-wrap justify-center gap-3">
+        <Link to="/"><Button>Back to home</Button></Link>
+        <Link to="/track"><Button variant="outline">Check report status</Button></Link>
+        <Link to="/report"><Button variant="outline">Report road damage</Button></Link>
       </div>
     </div>
   );

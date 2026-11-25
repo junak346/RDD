@@ -25,6 +25,9 @@ class RawDetection:
     y1: float
     x2: float
     y2: float
+    # Optional polygon/bitmask points for future segmentation models. Detection
+    # engines that only produce boxes leave this as None.
+    segmentation: list[list[float]] | None = None
 
 
 @dataclass(frozen=True)

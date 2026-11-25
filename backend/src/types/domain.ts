@@ -31,6 +31,8 @@ export interface DetectionRecord {
   severityScore: number;
   areaRatio: number;
   bbox: BBox;
+  /** Optional polygon points from a segmentation-capable model. */
+  segmentation?: number[][] | null;
 }
 
 export interface InspectionLocation {

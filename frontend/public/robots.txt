@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /official-access
+Disallow: /official
+
+# Route obscurity is not access control. The official portal is protected by
+# server-side authentication, RBAC, session expiry and CSRF validation.

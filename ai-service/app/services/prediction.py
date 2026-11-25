@@ -54,7 +54,14 @@ class PredictionService:
         engine = self._state.require_engine()
 
         decoded = decode_image(image_bytes, max_bytes=self._settings.max_image_bytes)
-        raw = engine.predict(decoded.array)
+        # MODEL_CONFIDENCE_THRESHOLD is the service-wide minimum gate. The real
+        # YOLO backend already uses it; applying it here also keeps demo and
+        # future engines consistent and makes the effective policy explicit.
+        raw = [
+            item
+            for item in engine.predict(decoded.array)
+            if item.confidence >= self._settings.confidence_threshold
+        ]
         raw = raw[: self._settings.max_detections]
 
         detections: list[Detection] = []
@@ -79,6 +86,7 @@ class PredictionService:
                     severity=sev.severity,  # type: ignore[arg-type]
                     severity_score=sev.score,
                     area_ratio=sev.area_ratio,
+                    segmentation=item.segmentation,
                 )
             )
             severities.append(sev.severity)
@@ -109,6 +117,8 @@ class PredictionService:
             warnings.append(
                 "DEMO MODE: these detections are heuristic placeholders, not real model inference."
             )
+        if not detections:
+            warnings.append("No road damage detected.")
 
         logger.info(
             "prediction_complete demo=%s detections=%d time_ms=%.1f",

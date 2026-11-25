@@ -36,6 +36,9 @@ export const errors = {
   forbidden: (message = 'You do not have permission to perform this action.') =>
     new ApiError(403, 'FORBIDDEN', message),
 
+  csrfRejected: (message = 'The security token is missing or invalid. Please refresh and try again.') =>
+    new ApiError(403, 'CSRF_REJECTED', message),
+
   notFound: (message = 'The requested resource was not found.') =>
     new ApiError(404, 'NOT_FOUND', message),
 

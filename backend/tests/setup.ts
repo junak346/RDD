@@ -12,5 +12,13 @@ process.env.EXPOSE_RESET_TOKENS = 'true';
 process.env.LOG_LEVEL = 'silent';
 process.env.AI_SERVICE_URL = 'http://127.0.0.1:8999';
 process.env.CLIENT_URL = 'http://localhost:5173';
+// New civic-platform tests need generous limits; dedicated limiter behaviour is
+// covered by middleware configuration and security docs.
+process.env.RATE_LIMIT_MAX_REQUESTS = '1000';
+process.env.PUBLIC_REPORT_MAX_REQUESTS = '100';
+process.env.PUBLIC_REPORT_IDENTICAL_LIMIT = '100';
+process.env.PUBLIC_REPORT_DAILY_IP_LIMIT = '100';
+process.env.OFFICIAL_COOKIE_SECURE = 'false';
+process.env.MODEL_CONFIDENCE_THRESHOLD = '0.35';
 
 export {};

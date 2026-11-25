@@ -34,6 +34,7 @@ interface RawDetection {
   severity: string;
   severity_score: number;
   area_ratio: number;
+  segmentation?: number[][] | null;
 }
 
 /** Untyped wire format from the Python service (mapped below). */
@@ -71,6 +72,7 @@ function mapDetection(raw: RawDetection): DetectionRecord {
     severityScore: raw.severity_score,
     areaRatio: raw.area_ratio,
     bbox: raw.bbox,
+    segmentation: raw.segmentation ?? null,
   };
 }
 

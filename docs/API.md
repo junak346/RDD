@@ -1,258 +1,148 @@
-# API Reference
+# Public API reference
 
-Base URL: `/api/v1` (versioned). All responses use a consistent envelope.
-
-**Success**
+Base URL: `/api/v1`. All responses use the existing envelope:
 
 ```json
-{ "success": true, "data": { "...": "..." }, "meta": { "dataMode": "mongo", "serverTime": "..." } }
+{ "success": true, "data": { }, "meta": { "requestId": "...", "timestamp": "...", "dataMode": "mongo|demo" } }
 ```
 
-`meta.dataMode` is `"demo"` when the labelled in-memory store is active — the
-UI shows a DEMO MODE banner in that case.
+Errors use `{ "success": false, "error": { "code", "message", "details?" } }`. Public report creation/status responses set `Cache-Control: no-store`.
 
-**Failure**
-
-```json
-{ "success": false, "error": { "code": "VALIDATION_ERROR", "message": "...", "details": [{ "field": "email", "message": "..." }] } }
-```
-
-Stable error codes: `BAD_REQUEST`, `INVALID_IMAGE`, `AUTH_REQUIRED`,
-`INVALID_CREDENTIALS`, `INVALID_TOKEN`, `FORBIDDEN`, `NOT_FOUND`, `CONFLICT`,
-`EMAIL_TAKEN`, `PAYLOAD_TOO_LARGE`, `VALIDATION_ERROR`, `RATE_LIMITED`,
-`AI_SERVICE_UNAVAILABLE`, `AI_INVALID_RESPONSE`, `DATABASE_UNAVAILABLE`,
-`INTERNAL_ERROR`.
-
-**Authentication** — protected endpoints require
-`Authorization: Bearer <JWT>` (returned by register/login).
-Roles: `user` (default), `inspector`, `admin`.
-
-**Rate limits** — global 300 req / 15 min per IP; auth endpoints 20 / 15 min;
-analysis endpoint 75 / 15 min. Exceeding a limit returns `429 RATE_LIMITED`.
+> This document is the **public** API reference. Private government authentication, case-management and image endpoints are intentionally omitted; they are described only in internal operator documentation and are protected server-side. No public official signup or Government Login route is published here.
 
 ---
 
-## Health
+## `GET /api/v1/public/config`
 
-### `GET /health`
-Liveness probe (no auth).
+Returns citizen capture requirements without authentication.
 
 ```json
-{ "success": true, "data": { "status": "ok", "uptimeSeconds": 42 }, "meta": { ... } }
+{
+  "camera": "required",
+  "location": "required",
+  "maxImageBytes": 10485760,
+  "acceptedImageTypes": ["image/jpeg", "image/png", "image/webp"],
+  "secureContextRequired": true,
+  "modelConfidenceThreshold": 0.35,
+  "privacyNotice": "Your camera image and location are collected to analyse and manage this road-damage report..."
+}
 ```
 
-### `GET /api/v1/health`
-Readiness: database + AI service state (200 when ready, 503 when degraded).
+Production camera/geolocation requires HTTPS; localhost is allowed for development.
+
+---
+
+## `POST /api/v1/public/reports`
+
+Anonymous, rate-limited citizen report submission. No account, token, email or phone number is required.
+
+**Content-Type:** `multipart/form-data`
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `image` | file | yes | Fresh camera JPEG/PNG/WebP. One file only; declared MIME and magic bytes are validated; `MAX_UPLOAD_MB` applies. |
+| `location` | JSON string | yes | `{ latitude, longitude, accuracy, capturedAt }`. Browser Geolocation is authoritative. |
+
+Example `location` field:
+
+```json
+{
+  "latitude": 26.1445,
+  "longitude": 91.7362,
+  "accuracy": 12,
+  "capturedAt": "2026-11-24T10:30:00.000Z"
+}
+```
+
+Validation:
+
+- finite latitude `[-90, 90]`, longitude `[-180, 180]`, accuracy within `MAX_LOCATION_ACCURACY_METERS`;
+- `capturedAt` must be recent and not in the future;
+- `0,0`, `NaN`, `null`, booleans, arrays, objects, injection-shaped and unknown fields are rejected;
+- no EXIF GPS is trusted; no unnecessary citizen PII is accepted.
+
+**201 response:**
 
 ```json
 {
   "success": true,
   "data": {
-    "status": "ok",
-    "version": "1.0.0",
-    "database": { "mode": "mongo", "connected": true },
-    "dataMode": "mongo",
-    "ai": { "reachable": true, "status": "ok", "engine": "yolo", "modelLoaded": true, "demo": false },
-    "uptimeSeconds": 42
+    "report": {
+      "publicReportId": "RVR-2026-7K92M4QX8P",
+      "submittedAt": "2026-11-24T10:30:01.000Z",
+      "lastUpdatedAt": "2026-11-24T10:30:02.000Z",
+      "status": "AI_ANALYSED",
+      "generalLocation": {
+        "area": "Approximate area 26.1°, 91.7°",
+        "precision": "coarse",
+        "accuracyMeters": 12
+      },
+      "detectedDamageType": "pothole",
+      "severity": "high",
+      "confidence": 0.94,
+      "noDamageDetected": false,
+      "aiPending": false,
+      "aiDemo": true,
+      "timeline": [
+        { "key": "SUBMITTED", "label": "Submitted", "state": "complete" },
+        { "key": "AI_ANALYSED", "label": "AI analysed", "state": "current" }
+      ],
+      "message": "AI detected a likely pothole."
+    }
   }
 }
 ```
 
----
+The public ID is unguessable and separate from the internal database ID. AI wording is assistive: “AI detected a likely pothole.” and “Estimated severity”; it never claims a guarantee. `aiDemo: true` / `DEMO MODE` means heuristic results from the labelled demo engine, not trained inference. `No road damage detected.` is returned when no detection passes the configured threshold; the report is preserved.
 
-## Auth — `/api/v1/auth`
-
-### `POST /auth/register`
-Body: `{ "name": "Ada Lovelace", "email": "ada@example.com", "password": "analytical1" }`
-Rules: name ≥ 2 chars; valid email; password ≥ 8 chars with letters + digit.
-`201` → `{ "user": {...}, "token": "JWT" }`. `409 EMAIL_TAKEN` on duplicates.
-
-### `POST /auth/login`
-Body: `{ "email": "...", "password": "..." }` → `200 { user, token }`.
-`401 INVALID_CREDENTIALS` on wrong email/password (identical message for both).
-
-### `POST /auth/logout` *(auth)*
-`200 { message }`. Stateless JWT — the client discards its token.
-
-### `POST /auth/forgot-password`
-Body: `{ "email": "..." }` → always `202` with the same message (prevents email
-enumeration). A single-use, 30-minute reset token is generated and hashed at
-rest; the link is delivered through the email provider hook
-(`backend/src/services/email.service.ts`).
-
-> Development only: when `EXPOSE_RESET_TOKENS=true` (never in production) the
-> response includes `resetToken` so the flow can be exercised without email.
-
-### `POST /auth/reset-password`
-Body: `{ "token": "...", "password": "newpassword1" }` → `200`.
-`401 INVALID_TOKEN` when the link is expired, unknown or already used.
-
-### `GET /auth/me` *(auth)*
-`200 { "user": { id, name, email, role, createdAt } }`.
+**Common errors:** `400 INVALID_IMAGE` (bad magic bytes), `413` / size limit, `422 VALIDATION_ERROR` (missing/invalid image or location), `429 RATE_LIMITED`.
 
 ---
 
-## Users — `/api/v1/users`
+## `GET /api/v1/public/reports/:publicId/status`
 
-### `PATCH /users/me` *(auth)*
-Body (any subset): `{ "name": "...", "currentPassword": "...", "newPassword": "..." }`.
-Changing the password requires the current one. → `200 { user }`.
+Login-free tracking by the unguessable public ID. The ID is normalized and hashed before lookup; sequential or guessed IDs return `404 NOT_FOUND`.
 
-### `GET /users` *(admin)*
-Query: `page`, `limit` (≤ 100). → `200 { items: [user], pagination }`.
-
----
-
-## Inspections — `/api/v1/inspections`
-
-### `POST /inspections` *(auth, multipart)*
-Fields:
-
-| field | type | required | notes |
-|---|---|---|---|
-| `image` | file | yes | JPEG/PNG/WebP, ≤ `MAX_UPLOAD_MB` (default 10 MB), validated by magic bytes |
-| `latitude` | number | no | −90…90 |
-| `longitude` | number | no | −180…180 |
-| `address` | string | no | ≤ 240 chars |
-
-`201 { "inspection": { ... } }`. Failures: `400 INVALID_IMAGE`,
-`413 PAYLOAD_TOO_LARGE`, `422 VALIDATION_ERROR`, `503 AI_SERVICE_UNAVAILABLE`.
-
-### `GET /inspections` *(auth)*
-Query: `page`, `limit`, `search`, `damageType`, `severity`, `sort`
-(`createdAt_desc|createdAt_asc|detections_desc`), `from`, `to` (ISO dates).
-Regular users see their own records; admins see all.
-→ `200 { items: [inspection], pagination: { page, limit, total } }`.
-
-### `GET /inspections/recent` *(auth)*
-Query: `limit` (default 5) → `200 { items }`.
-
-### `GET /inspections/:id` *(auth, owner/admin)*
-`200 { "inspection": { ... } }` — full record including detections.
-
-### `PATCH /inspections/:id/location` *(auth, owner/admin)*
-Body: `{ "latitude": 26.14, "longitude": 91.73, "address": "GS Road, Guwahati" }`
-→ `200 { inspection }`.
-
-### `DELETE /inspections/:id` *(auth, owner/admin)*
-`204`. Removes the record and both image files.
-
-### `GET /inspections/:id/image?variant=original|annotated` *(auth, owner/admin)*
-Returns the image bytes (`Content-Type: image/jpeg|png|webp`, `Cache-Control: private`).
-
-### Inspection object
-
-```json
-{
-  "id": "665f…",
-  "userId": "…",
-  "status": "completed",
-  "timestamp": "2026-11-24T10:00:00.000Z",
-  "createdAt": "2026-11-24T10:00:01.000Z",
-  "location": { "latitude": 26.1445, "longitude": 91.7362, "address": "GS Road, Guwahati, Assam" },
-  "model": {
-    "name": "road-damage-yolo", "version": "1.0.0", "engine": "yolo",
-    "device": "cpu", "demo": false, "confidenceThreshold": 0.35, "iouThreshold": 0.45
-  },
-  "processingTimeMs": 421.7,
-  "aiWarnings": [],
-  "detections": [
-    {
-      "classId": 0, "className": "pothole", "confidence": 0.94,
-      "severity": "high", "severityScore": 0.71, "areaRatio": 0.13,
-      "bbox": { "x1": 100, "y1": 120, "x2": 500, "y2": 400 }
-    }
-  ],
-  "summary": {
-    "detectionCount": 1,
-    "countsByClass": { "pothole": 1 },
-    "countsBySeverity": { "low": 0, "moderate": 0, "high": 1 },
-    "maxSeverity": "high"
-  },
-  "image": { "url": "/api/v1/inspections/…/image?variant=original", "mimeType": "image/jpeg", "size": 240000, "width": 1280, "height": 720 },
-  "annotatedImage": { "url": "/api/v1/inspections/…/image?variant=annotated" },
-  "aiDemo": false
-}
+```text
+GET /api/v1/public/reports/RVR-2026-7K92M4QX8P/status
 ```
 
-`aiDemo: true` / `model.demo: true` means the labelled demo engine produced the
-result — never a trained model.
+Returns the same strict public DTO as creation. It contains only a coarse area and limited lifecycle timeline. It never contains exact coordinates, image URLs/bytes, internal notes, audit history, IP hashes, department/official names, administrative priority, incident IDs, citizen report counts or private administrative data.
+
+Lifecycle statuses stored in the database: `SUBMITTED`, `AI_ANALYSIS`, `AI_ANALYSED`, `UNDER_REVIEW`, `VERIFIED`, `REJECTED`, `ASSIGNED`, `IN_PROGRESS`, `RESOLVED`, `CLOSED`.
 
 ---
 
-## Analytics — `/api/v1/analytics` *(auth)*
+## Legacy compatibility APIs
 
-Shared query filters: `damageType`, `severity`, `from`, `to`.
+The following authenticated endpoints remain temporarily for existing tooling and are not the citizen reporting flow:
 
-### `GET /analytics/summary`
+| Method | Path | Notes |
+| --- | --- | --- |
+| `POST` | `/auth/register`, `/auth/login`, `/auth/forgot-password`, `/auth/reset-password` | Legacy citizen/account JWT flow. |
+| `GET` | `/auth/me`, `/users/*` | Legacy profile/admin tooling. |
+| `POST` | `/inspections` | Authenticated upload analysis; retained for compatibility. |
+| `GET` | `/inspections`, `/inspections/:id`, `/inspections/:id/image` | Owner/admin-checked legacy inspection data. |
+| `GET` | `/analytics/*`, `/maps/*` | Legacy authenticated analytics/map endpoints. |
+| `GET` | `/health` | Service health. |
 
-```json
-{
-  "totalInspections": 42, "totalDetections": 87,
-  "highSeverityInspections": 6, "withLocation": 31,
-  "avgConfidence": 0.71,
-  "countsByClass": { "pothole": 40, "crack": 33, "surface_damage": 14 },
-  "countsBySeverity": { "low": 30, "moderate": 41, "high": 16 },
-  "topAreas": [{ "area": "GS Road, Guwahati", "count": 9 }]
-}
-```
-
-### `GET /analytics/timeseries?interval=day|week|month`
-`{ "interval": "day", "points": [{ "date": "2026-11-24", "inspections": 3, "detections": 7 }] }`
-
-### `GET /analytics/distribution`
-`{ "byClass": [{ "name": "pothole", "count": 40 }], "bySeverity": [{ "name": "low", "count": 30 }] }`
+Legacy Bearer tokens are never accepted by private government APIs. Public `/public/*` requests do not attach the legacy JWT.
 
 ---
 
-## Maps — `/api/v1/maps` *(auth)*
+## Public/private DTO separation
 
-### `GET /maps/reports`
-Filters as above. Returns only inspections that have location data.
+| Field | Public citizen DTO | Private official DTO |
+| --- | --- | --- |
+| Unguessable public report ID | ✅ | ✅ |
+| Internal database ID | ❌ | ✅ |
+| Coarse area | ✅ | ✅ (plus exact point) |
+| Exact latitude/longitude/accuracy/timestamp | ❌ | ✅ |
+| Original/annotated image bytes or URLs | ❌ | ✅ (authorized only) |
+| AI class/confidence/estimated severity | ✅ | ✅ |
+| Administrative priority / department / official | ❌ | ✅ |
+| Incident ID and citizen report count | ❌ | ✅ |
+| Internal notes / action history / audit metadata | ❌ | ✅ |
+| IP hash / suspicious flag / archived state | ❌ | ✅ |
 
-```json
-{
-  "reports": [{
-    "inspectionId": "…", "latitude": 26.1445, "longitude": 91.7362,
-    "address": "GS Road, Guwahati, Assam", "timestamp": "…",
-    "damageTypes": ["pothole", "crack"], "detectionCount": 3,
-    "maxSeverity": "high", "maxConfidence": 0.94,
-    "inspectionUrl": "/api/v1/inspections/…"
-  }]
-}
-```
-
----
-
-## AI service (FastAPI, internal)
-
-Interactive OpenAPI docs at `http://localhost:8000/docs`.
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/health` | service + engine status (`demo: true` when the demo engine is active) |
-| `GET` | `/model/info` | engine name/version/classes/thresholds |
-| `POST` | `/predict` | multipart `file` **or** JSON `{ "image_base64": "…" }` |
-
-Prediction response (abridged):
-
-```json
-{
-  "success": true,
-  "demo": false,
-  "model": { "name": "road-damage-yolo", "version": "1.0.0", "engine": "yolo", "device": "cpu", "demo": false, "classes": ["pothole", "crack"], "confidence_threshold": 0.35, "iou_threshold": 0.45 },
-  "image": { "width": 1920, "height": 1080, "format": "jpeg" },
-  "detections": [
-    { "class_id": 0, "class_name": "pothole", "confidence": 0.94,
-      "bbox": { "x1": 100, "y1": 120, "x2": 500, "y2": 400 },
-      "severity": "high", "severity_score": 0.71, "area_ratio": 0.13 }
-  ],
-  "summary": { "detection_count": 1, "counts_by_class": { "pothole": 1 }, "counts_by_severity": { "low": 0, "moderate": 0, "high": 1 }, "max_severity": "high" },
-  "processing_time_ms": 123.4,
-  "annotated_image_base64": "…JPEG…",
-  "warnings": []
-}
-```
-
-Errors: `400 INVALID_IMAGE`, `413 IMAGE_TOO_LARGE`, `422 MISSING_FILE`,
-`503 MODEL_UNAVAILABLE` (real mode, weights not installed), `500 INTERNAL_ERROR`.
+No public directory listing is exposed. Images are retrieved only through an authenticated, authorized, `private, no-store` endpoint in the operator surface, whose documentation is intentionally outside this public API reference.

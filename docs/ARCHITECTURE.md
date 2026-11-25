@@ -1,178 +1,112 @@
 # Architecture
 
-## System overview
+## Product shape
 
-```
-┌──────────────────┐      ┌───────────────────────────┐      ┌──────────────────────────┐
-│  React SPA       │      │  Node.js / Express API    │      │  Python / FastAPI        │
-│  (TypeScript,    │ ───► │  /api/v1/*                │ ───► │  AI inference service    │
-│   Vite, Tailwind)│      │  auth · validation ·      │      │  POST /predict           │
-│                  │ ◄─── │  storage · analytics      │ ◄─── │  YOLO / PyTorch / OpenCV │
-└──────────────────┘      └────────────┬──────────────┘      └──────────────────────────┘
-        ▲                              │
-        │  nginx (prod) / Vite proxy   │  Mongoose ODM
-        │                              ▼
-        │                    ┌──────────────────┐
-        └──────────────────  │  MongoDB 7       │
-                             │  users,          │
-                             │  inspections,    │
-                             │  password_resets │
-                             └──────────────────┘
-```
+This repository now implements two deliberately separate product surfaces over one preserved technical stack:
 
-The three application tiers are independent processes that communicate over
-HTTP. The frontend never talks to the AI service or the database directly — all
-data flows through the Express API, which is the single authorisation and
-validation boundary.
+1. **Anonymous citizen reporting** — camera-first, location-required, no account, limited public status.
+2. **Government response** — an unadvertised operator portal with independent authentication, RBAC, case management, exact-GPS access, analytics and audit history.
 
-## Request lifecycle: image analysis
+The original React/Vite frontend, Express/TypeScript backend, MongoDB/Mongoose repositories, FastAPI/YOLO/OpenCV AI service, Leaflet maps and Recharts analytics remain. Legacy authenticated inspection APIs remain temporarily for compatibility but are no longer the public citizen path.
 
-1. User drops an image on `/app/analyze` (client-side type/size validation).
-2. `POST /api/v1/inspections` (multipart) — Bearer JWT required.
-3. Backend middleware: rate limit → auth → multer (memory buffer) → zod fields.
-4. `storage.service` sniffs magic bytes (JPEG/PNG/WebP only) and writes the
-   original under a server-generated UUID name in `UPLOAD_DIRECTORY`.
-5. `ai.client` calls `POST {AI_SERVICE_URL}/predict` with a hard timeout.
-6. AI service: validate/decode → engine inference → severity estimation →
-   annotated JPEG → structured JSON (typed pydantic schema).
-7. Backend persists the inspection (detections embedded), stores the annotated
-   image, and returns the full record.
-8. Frontend caches it via React Query; dashboard/analytics/map queries refresh.
-
-If the AI service is unavailable the request fails with a clean
-`503 AI_SERVICE_UNAVAILABLE` and **no partial record is persisted** — results
-are never fabricated.
-
-## Backend layering
-
-```
-routes/        URL → middleware → controller wiring (no business logic)
-controllers/   HTTP concerns only (parse request, call service, envelope response)
-services/      business logic (auth, inspections, analytics, AI client, storage)
-repositories/  data access contract + two implementations:
-               ├── mongo/    Mongoose schemas + aggregations (production)
-               └── memory/   in-process store (explicitly-labelled demo mode)
-models/        Mongoose schemas with indexes
-validators/    zod schemas + validate() middleware (422 with field details)
-middleware/    auth, rate limiting, uploads, centralised error handling
-config/        env parsing (zod), fails fast on misconfiguration
+```text
+                         ┌──────────────────────────────┐
+                         │ Citizen browser (HTTPS)      │
+                         │ Camera + Geolocation + SPA   │
+                         └──────────────┬───────────────┘
+                                        │ relative /api URLs
+                         ┌──────────────▼───────────────┐
+                         │ nginx / Vite proxy           │
+                         │ CSP · Permissions-Policy     │
+                         │ noindex for private pages    │
+                         └──────────────┬───────────────┘
+                                        │
+             ┌──────────────────────────▼──────────────────────────┐
+             │ Express /api/v1                                     │
+             │ helmet · CORS allowlist · rate limits · Zod         │
+             │ public router             official router           │
+             │ anonymous DTO             auth + RBAC + CSRF        │
+             └───────┬───────────────────────────────┬─────────────┘
+                     │                               │
+       ┌─────────────▼─────────────┐   ┌─────────────▼──────────────┐
+       │ Report workflow           │   │ Official workflow          │
+       │ image storage abstraction │   │ dashboard/table/map/detail │
+       │ abuse guard · public IDs  │   │ actions · audit · settings │
+       │ duplicate grouping        │   │ CSV export · exact GPS     │
+       └─────────────┬─────────────┘   └─────────────┬──────────────┘
+                     │                               │
+       ┌─────────────▼─────────────┐   ┌─────────────▼──────────────┐
+       │ FastAPI /predict           │   │ MongoDB                    │
+       │ YOLO/OpenCV or DEMO MODE   │   │ roadReports (2dsphere)     │
+       │ boxes · severity · timing  │   │ incidents · officials      │
+       │ optional segmentation      │   │ departments · auditLogs    │
+       └───────────────────────────┘   │ systemSettings             │
+                                       └────────────────────────────┘
 ```
 
-### Data modes
+## Frontend
 
-`DATA_MODE` selects the repository implementation:
+- `PublicLayout`, `LandingPage`, `CameraReportPage`, `ReportSuccessPage`, `TrackPage`, `NotFoundPage`.
+- `useCameraCapture` uses maintained `getUserMedia()`, a long-edge cap of 1920 px, JPEG quality 0.88, object-URL previews and full stream cleanup. It has no `<input type="file">`.
+- `useRequiredGeolocation` requests GPS only after explicit user action with high accuracy, zero cached position and a 15 s timeout.
+- `reportsService` posts multipart `image` + `location`; the shared `api` client deliberately does not attach a legacy citizen JWT to `/public/*`.
+- `officialApi` is a separate credentialed axios client; it never reads the citizen token. Official pages are wrapped by `OfficialAuthProvider`, mounted only when the browser is in the private area. A frontend guard improves UX, but every official API re-checks auth server-side.
+- Dashboard, reports table, Leaflet command map, hotspots, analytics, incidents, notifications, audit, admin, departments and officials pages consume real backend data.
+- Vite build splits React, chart and map chunks. Tailwind provides the design system; existing UI primitives are reused.
 
-| Mode | Store | Behaviour |
-|---|---|---|
-| `mongo` (default) | MongoDB via Mongoose | Production. |
-| `demo` | In-memory maps | Every API response is tagged `meta.dataMode: "demo"`; the UI shows a permanent DEMO MODE banner. Optional `DEMO_SEED=true` loads clearly-labelled sample records (demo user `demo@rdd.local` / `demo1234`). |
+## Backend modules
 
-The two implementations satisfy the same `Repositories` interface
-(`repositories/types.ts`), so services are written once and stay testable
-without a database.
+### Configuration and types
 
-## AI service structure
+`config/index.ts` validates environment variables once with Zod: data mode, separate citizen JWT/official session/HMAC secrets, official session/lockout, AI URL/timeout, upload limits, rate/abuse limits, location limits, duplicate radius/window, `MODEL_CONFIDENCE_THRESHOLD`, configurable SLA rules, bootstrap and CORS origins. Production requires three distinct secrets and refuses missing or reused keys. `types/civic.ts` centralizes statuses, priorities, roles, actions, records, DTOs and analytics shapes.
 
-```
-ai-service/app/
-├── api/          FastAPI routers (predict, model info, health)
-├── core/         config, typed errors, logging
-├── models/       engine implementations + selection registry
-│   ├── base.py           DetectionEngine interface (swap models freely)
-│   ├── yolo_engine.py    real Ultralytics YOLO backend (lazy imports)
-│   ├── demo_engine.py    labelled heuristic engine (demo=true responses)
-│   └── registry.py       AI_MODE=auto|real|demo policy
-├── services/     preprocessing · severity · visualization · orchestration
-├── schemas/      pydantic response schemas (OpenAPI-visible)
-└── classes.json  configurable damage-class catalogue
-```
+### Public reporting
 
-The application depends only on the `DetectionEngine` interface. Swapping in a
-new model (different YOLO generation, segmentation model, TensorRT export)
-means adding one engine class — no API/service changes.
+`routes/public.routes.ts` → `publicReport.controller.ts` → `civicReport.service.ts`:
 
-## Severity engine
+- `GET /public/config` — camera/location requirements, accepted types, size limit, threshold and privacy notice.
+- `POST /public/reports` — rate-limited multipart upload, strict location validation, magic-byte image check, protected storage, secure public ID, persisted lifecycle, AI call, confidence gate, honest demo/no-damage labelling, incident grouping.
+- `GET /public/reports/:publicId/status` — hashed, normalized public ID lookup and strict public DTO.
 
-`services/severity.py` computes a score from three observable signals:
+The service records `REPORT_SUBMITTED`, `AI_ANALYSIS_STARTED`, AI completion/unavailability, duplicate grouping and domain events. If AI is unavailable, the report remains `SUBMITTED`; it never fabricates detections.
 
-```
-score = 0.50 · size_signal(bbox_area / image_area, saturating at 25% coverage)
-      + 0.30 · detector_confidence
-      + 0.20 · class_prior(classes.json severity_weight)
-```
+### Official workflow
 
-Thresholds: `score ≥ 0.60 → high`, `≥ 0.35 → moderate`, else `low`.
-This is a **documented heuristic estimate**, not a civil-engineering verdict —
-the disclaimer is part of every report page and of `docs/AI_MODEL.md`.
+`routes/official.routes.ts` → `official.controller.ts` → `official.service.ts` / `officialAuth.service.ts`:
 
-## Database schema & indexing
+- Login is the only unauthenticated official endpoint.
+- `requireOfficialAuth` verifies the separate cookie/JWT, repository account, active status, email, role and session version.
+- `requireOfficialRole` and action-specific role tables enforce RBAC.
+- `requireOfficialCsrf` checks the double-submit token on state changes.
+- Lifecycle transitions are validated; AI severity and administrative priority are separate.
+- Every action appends an immutable-style audit event and publishes an internal domain event.
+- Dashboard, analytics, map, incidents, notifications, audit, settings, departments, officials, CSV export and report detail all read from the repository.
 
-**users** — `name, email(unique), passwordHash(select:false), role(user|inspector|admin), timestamps`
-Indexes: `{email: 1} unique`, `{createdAt: -1}`.
+### Repositories
 
-**inspections** — `userId, image ref, annotatedImage ref, timestamp, location{lat,lng,address}, status,
-model info, processingTimeMs, aiWarnings, detections[embedded], summary, timestamps`
-Indexes:
-- `{userId: 1, createdAt: -1}` — history lists (most common query)
-- `{createdAt: -1}` — global recency / admin views
-- `{detections.className: 1}` — damage-type filtering (multikey)
-- `{detections.severity: 1}` — severity filtering (multikey)
-- `{location.latitude: 1, location.longitude: 1}` — map/geo range queries
+`repositories/civic` exposes one `ICivicRepository` with memory and Mongo implementations. It has no audit update/delete methods. Mongo documents:
 
-**password_resets** — `userId, tokenHash(unique), expiresAt, usedAt` with a
-TTL index on `expiresAt` (expired tokens removed automatically).
+- `roadReports`: unguessable public ID/hash, citizen token hash, GeoJSON `Point [longitude, latitude]`, accuracy, image metadata/hash, AI analysis, status, priority, assignment, SLA fields, notes, audit history, suspicious/archive flags, `2dsphere` and workflow indexes.
+- `incidents`: grouped report IDs, public incident ID, count, centroid, primary damage type, max severity.
+- `officials`: bcrypt hash, role, department, status, failed-login/lockout state, session version.
+- `departments`: configurable name/code/description/active.
+- `auditLogs`: append-only actor/role/action/timestamp/report/metadata.
+- `systemSettings`: SLA, priority labels, duplicate rules and admin model-gate override.
 
-Detections are embedded documents (one inspection → few detections) to avoid an
-extra collection and joins; the multikey indexes make per-class analytics fast.
-Analytics use MongoDB aggregation pipelines (`$facet`, `$unwind`, `$group`).
+Memory mode seeds clearly labelled demo data only for `DATA_MODE=demo` or tests. Mongo mode uses real data.
 
-## Frontend architecture
+### Storage and images
 
-```
-src/
-├── components/
-│   ├── ui/           design-system primitives
-│   ├── layout/       AppShell (sidebar/drawer), PublicLayout, DemoBanner
-│   ├── analysis/     Dropzone, ImageViewer (zoom/pan/toggle), DetectionList
-│   └── charts/       recharts wrappers (trend, pie, bar)
-├── pages/            one file per route
-├── stores/           auth context, toast system
-├── hooks/            useAuthImage (blob loading), useGeolocation, useDebounce
-├── services/         axios client + typed API modules
-└── utils/            formatting, severity/class color maps, cn()
-```
+`services/reportStorage.ts` wraps local storage behind `ReportImageStorage` and includes a cloud/S3-compatible adapter hook. Files get random names, are never served from a public directory, and are retrieved through `GET /official/reports/:id/image` with cookie auth and `private, no-store`. The nginx config denies any direct upload path. Image metadata includes width, height, format, size, capturedAt and uploadedAt. Browser GPS is authoritative; EXIF GPS is not trusted.
 
-Data fetching uses TanStack Query for caching, loading/error states and
-invalidation after mutations. Auth tokens are held in `localStorage` and sent
-as `Authorization: Bearer` headers (no cookies → CSRF surface is minimal).
+### AI pipeline
 
-## Deployment topologies
+The existing `ai.client.ts` calls `POST {AI_SERVICE_URL}/predict`. FastAPI decodes the image with OpenCV/PIL, runs either the Ultralytics YOLO engine or the clearly labelled demo engine, estimates severity, draws annotated boxes, and returns damage class, confidence, bounding boxes, optional segmentation, severity, processing time, model version and warnings. `MODEL_CONFIDENCE_THRESHOLD` gates detections in the AI service; the backend applies the highest of its environment baseline, an optional admin override and the model-reported threshold. No trained weights ship; `AI_MODE=real` fails cleanly rather than silently faking results.
 
-* **Development** — three dev servers; Vite proxies `/api` to the backend.
-* **Docker Compose** — `mongo`, `ai-service`, `backend`, `frontend`
-  (nginx serving the built SPA and proxying `/api` to the backend).
-* **Production** — the same containers behind a TLS-terminating reverse proxy;
-  see `docs/DEPLOYMENT.md`.
+### Analytics, hotspots and events
 
-## Observability
+Analytics are computed from stored reports: timeseries, class/severity/department distributions, resolution rate, average resolution time, unresolved/overdue counts. Hotspots are descriptive grid aggregations labelled **Reported Damage Hotspots**, with an explicit disclaimer that repeated reports do not prove statistical significance or causation. `domainEvents.ts` is an in-process pub/sub plus recent-event feed, ready for WebSocket/SSE or a message bus; it does not claim SMS/email delivery.
 
-* Structured JSON logs (pino) with centralised redaction of secrets.
-* `GET /health` — liveness. `GET /api/v1/health` — readiness including
-  database connection state and AI service reachability/mode.
-* AI service logs every prediction with demo flag, count and duration.
+### Legacy compatibility
 
-## Testing strategy
-
-| Layer | Tool | What it covers |
-|---|---|---|
-| Frontend | Vitest + Testing Library | components, forms, upload validation, utils |
-| Backend unit | Vitest | filenames/magic bytes, hashing, JWT, zod schemas, AI client contract (mocked HTTP) |
-| Backend API | Vitest + supertest | full workflow against an HTTP stub speaking the real AI contract; auth, validation, permissions, analytics math |
-| Backend DB | Vitest + mongodb-memory-server | real MongoDB semantics + aggregations (skips gracefully where the binary cannot be downloaded; runs in CI) |
-| AI service | pytest + FastAPI TestClient | endpoints, response schema, image validation, severity rules, visualisation, mocked YOLO parsing |
-| E2E smoke | `scripts/smoke.sh` | live stack: register → upload → analysis → history → analytics → map → delete |
-
-## Security architecture
-
-See `docs/SECURITY.md` for the full model (authentication, validation, upload
-handling, headers, rate limiting, secret management).
+`POST /api/v1/inspections`, `/auth/*`, `/users/*`, `/analytics/*`, `/maps/*` and the authenticated `/app/*` SPA remain temporarily. They use the original JWT/Bearer flow and are no longer linked from public citizen navigation. Citizen `/public/*` requests never attach the legacy JWT. Official auth uses a separate key/issuer/cookie and rejects citizen tokens.
