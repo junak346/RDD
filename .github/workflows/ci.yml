@@ -67,10 +67,23 @@ jobs:
       - run: python -m pytest -q
 
   docker:
-    name: Docker images build
+    name: Deployment configuration and Docker images
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Validate Compose configuration
+        env:
+          JWT_SECRET: ci-jwt-secret-0123456789abcdef
+          HMAC_SECRET: ci-hmac-secret-0123456789abcdef
+          OFFICIAL_JWT_SECRET: ci-official-secret-0123456789
+        run: docker compose config -q
+      - name: Validate nginx configuration
+        run: |
+          docker run --rm \
+            -v "$PWD/frontend/nginx-map.conf:/etc/nginx/conf.d/00-rdd-map.conf:ro" \
+            -v "$PWD/frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro" \
+            -v "$PWD/frontend/nginx-headers.conf:/etc/nginx/snippets/rdd-headers.conf:ro" \
+            nginx:1.27-alpine nginx -t
       - name: Build backend image
         run: docker build -t rdd-backend ./backend
       - name: Build frontend image

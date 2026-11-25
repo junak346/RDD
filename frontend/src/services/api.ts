@@ -47,7 +47,10 @@ export const api: AxiosInstance = axios.create({
 
 api.interceptors.request.use((request) => {
   const token = getStoredToken();
-  if (token) {
+  // Public citizen reporting/tracking is anonymous. Never attach a legacy
+  // account JWT to /public/*, and never use the official cookie as citizen auth.
+  const isPublicApi = request.url?.startsWith('/public/') ?? false;
+  if (token && !isPublicApi) {
     request.headers.Authorization = `Bearer ${token}`;
   }
   return request;

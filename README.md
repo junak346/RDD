@@ -1,244 +1,113 @@
-# AI Road Damage Detection
+# AI-POWERED CITIZEN ROAD DAMAGE REPORTING AND GOVERNMENT RESPONSE PLATFORM
 
-A production-grade web + AI platform that analyses road images with computer
-vision to detect potholes, cracks and surface damage — with confidence scores,
-severity estimates, an inspection history, live analytics and an interactive
-damage map.
+**Capture. Detect. Locate. Report. Resolve.**
 
-> **See road damage before it becomes a bigger problem.**
+RoadVision lets a citizen report road damage without creating an account: open the browser camera, capture a **fresh** photo, explicitly share current GPS, review the evidence, and submit. The existing FastAPI/YOLO/OpenCV pipeline analyses the image, the Node/Express API stores the case and produces an unguessable public report ID, and citizens can follow a limited public timeline at `/track`. Authorized government officials use a separate, unadvertised portal to verify, assign, inspect, resolve and audit cases.
 
-![Stack](https://img.shields.io/badge/React%2018-TypeScript-61dafb) ![Stack](https://img.shields.io/badge/Node.js%20Express-API-3c873a) ![Stack](https://img.shields.io/badge/FastAPI%20PyTorch-AI-009688) ![Stack](https://img.shields.io/badge/MongoDB-Database-47a248)
+> AI results are assistive estimates, never a guarantee that a road is damaged. Officials make the final decision. If trained model weights are unavailable, results are clearly labelled **DEMO MODE**.
 
 ---
 
-## Contents
+## What changed from the upload-centric app
 
-- [Overview](#overview) · [Features](#features) · [Architecture](#architecture)
-- [Tech stack](#tech-stack) · [Repository structure](#repository-structure)
-- [Quick start](#quick-start) · [Environment variables](#environment-variables)
-- [AI model setup](#ai-model-setup) · [Testing](#testing) · [Production build & deployment](#production-build--deployment)
-- [Documentation](#documentation) · [Limitations](#limitations) · [Troubleshooting](#troubleshooting)
+- Primary citizen flow is camera-first: `navigator.mediaDevices.getUserMedia()` → fresh JPEG capture → retake/confirm → explicit browser Geolocation → submit.
+- No file input, gallery picker, drag/drop, browse-files button or normal upload CTA in the citizen flow.
+- No citizen login, registration, password, email login or phone login is required. Reports are anonymous/public and do not request unnecessary personal data.
+- Public capability IDs (`RVR-YYYY-XXXXXXXXXX`) use secure randomness and are separate from internal MongoDB IDs. Public status lookup hashes the normalized ID; guessed IDs return 404.
+- Exact GPS, original/annotated images, internal notes, administrative priority, incident IDs, report counts and audit details are **not** exposed through public endpoints. Public tracking shows a coarse area only.
+- Status lifecycle is persisted in the database: `SUBMITTED`, `AI_ANALYSIS`, `AI_ANALYSED`, `UNDER_REVIEW`, `VERIFIED`, `REJECTED`, `ASSIGNED`, `IN_PROGRESS`, `RESOLVED`, `CLOSED`.
+- A private government portal has separate server-side authentication, RBAC, short-lived httpOnly SameSite cookies, CSRF, lockout/rate limiting, session invalidation and append-only audit history. It is not linked from public navigation or public API docs.
+- Legacy authenticated inspection APIs and tooling remain temporarily for compatibility, but are no longer advertised as the citizen path.
 
-## Overview
+---
 
-Road damage is slow and expensive to identify manually. This platform lets an
-inspector photograph a road surface, run an AI analysis in seconds, and keep
-every result as a structured, searchable record:
+## Architecture at a glance
 
-1. Upload a road image (drag & drop, optional GPS capture).
-2. The backend validates it and calls the independent Python inference service.
-3. Damage regions are located, classified (pothole / crack / surface damage /
-   other), scored with confidence and ranked by estimated severity.
-4. The annotated result is stored and displayed with an interactive viewer.
-5. Dashboard, analytics and map views update from real stored data.
+```text
+Citizen mobile browser (HTTPS)
+  React/Vite SPA → POST /api/v1/public/reports (multipart image + location)
+                 → GET /api/v1/public/reports/:publicId/status
+        │
+        ▼
+Express /api/v1  ── validation · rate limits · abuse guard · image storage abstraction
+        │             public DTO (coarse location only)      official DTO (exact GPS)
+        ├──────────────────────────► FastAPI /predict (YOLO/OpenCV or labelled demo engine)
+        ├──────────────────────────► MongoDB 2dsphere reports, incidents, officials,
+        │                            departments, system settings, append-only audit logs
+        └──────────────────────────► Hidden operator SPA (separate auth/RBAC/CSRF)
 
-**Honesty first:** the repository contains the complete real inference
-architecture (YOLO/PyTorch) but ships **without trained weights** — see
-[AI model setup](#ai-model-setup). Until real weights are installed the service
-runs a clearly-labelled **demo engine** whose every response is flagged
-`demo: true` and shown with DEMO MODE banners in the UI. Nothing synthetic is
-ever presented as real inference.
-
-## Features
-
-**Public site** — premium landing page, product tour, registration/login,
-password recovery.
-
-**AI analysis workspace** — drag & drop upload with validation, image preview,
-optional geolocation (browser GPS or manual), real upload progress, honest
-indeterminate analysis state, and a result view with original ↔ annotated
-toggle, zoom/pan, hover-highlighted boxes and a per-detection list (class,
-confidence, severity, coordinates).
-
-**Inspection management** — history with search, filtering (damage type,
-severity, date), sorting and pagination; detailed report pages with model
-information, warnings and location; delete with confirmation.
-
-**Dashboard & analytics** — total inspections/detections, pothole & high-severity
-counts, damage trends over time, class & severity distributions, top affected
-areas, date-range/type/severity filters — all computed from stored data (never
-hardcoded).
-
-**Damage map** — Leaflet map with severity-coded markers, filters, detail
-popups and links to full reports. Location is always optional.
-
-**Platform** — JWT auth with roles (user/inspector/admin), rate limiting,
-input validation, secure headers, structured logging, health probes,
-Docker Compose stack, GitHub Actions CI, responsive + accessible UI.
-
-## Architecture
-
-```
-React + TypeScript + Vite + Tailwind  →  Node.js/Express REST API (/api/v1)
-        ↑                                      ↓                ↓
-   nginx (prod)                          MongoDB          Python FastAPI AI service
-                                         (Mongoose)       (YOLO/PyTorch/OpenCV)
+Leaflet / Recharts dashboards use real stored data. No hardcoded statistics.
 ```
 
-The three tiers are independent services; the Express API is the single
-auth/validation boundary. The AI model sits behind a `DetectionEngine`
-interface so it can be upgraded without touching the rest of the system.
-Full details: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [CITIZEN_REPORTING.md](CITIZEN_REPORTING.md), [GOVERNMENT_PORTAL.md](GOVERNMENT_PORTAL.md), [docs/API.md](docs/API.md), [docs/SECURITY.md](docs/SECURITY.md), [docs/AI_MODEL.md](docs/AI_MODEL.md) and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
 
-## Tech stack
+---
 
-| Layer | Technologies |
-|---|---|
-| Frontend | React 18, TypeScript, Vite, Tailwind CSS, TanStack Query, Recharts, Leaflet/react-leaflet, lucide-react |
-| Backend | Node.js 22, Express 4, TypeScript, Mongoose 8, zod, JWT (jsonwebtoken), bcryptjs, helmet, pino |
-| AI service | Python 3.11, FastAPI, Pydantic v2, Pillow/NumPy, (optional) Ultralytics YOLO · PyTorch · OpenCV |
-| Database | MongoDB 7 (schemas + indexes + aggregation pipelines) |
-| Quality | Vitest + Testing Library + supertest, pytest, ESLint, Prettier, ruff, GitHub Actions |
-| Deploy | Docker / Docker Compose, nginx |
+## Quick start (local development)
 
-## Repository structure
-
-```
-├── frontend/            React SPA (components/, pages/, stores/, services/, hooks/)
-├── backend/             Express API (controllers/, services/, repositories/, models/)
-├── ai-service/          FastAPI inference (models/, services/, schemas/, classes.json)
-├── docs/                ARCHITECTURE · API · AI_MODEL · SECURITY · DEPLOYMENT
-├── scripts/smoke.sh     end-to-end HTTP smoke test
-├── .github/workflows/   CI pipeline
-├── docker-compose.yml   full stack: mongo + ai-service + backend + frontend
-├── .env.example         all configuration variables (documented)
-└── Makefile             install / dev / test / lint / build / smoke / up
-```
-
-## Quick start
-
-### Option A — Docker (recommended)
+Camera and Geolocation require a secure context; `localhost` is the documented development exception. Production **must** terminate HTTPS in front of the frontend.
 
 ```bash
-cp .env.example .env        # set JWT_SECRET to a long random string
+cp .env.example .env
+# Install dependencies
+(cd backend && npm ci)
+(cd frontend && npm ci)
+(cd ai-service && python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt -r requirements-dev.txt)
+
+# Three terminals
+(cd ai-service && . .venv/bin/activate && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000)
+(cd backend && npm run dev)       # http://localhost:5000
+(cd frontend && npm run dev)      # http://localhost:5173
+```
+
+The Vite dev server proxies `/api` to the backend, so browser code uses same-origin relative URLs. For a container deployment:
+
+```bash
 docker compose up --build
-# → frontend http://localhost:8080 · API http://localhost:5000 · AI http://localhost:8000
+# frontend: http://localhost:8080 · backend: http://localhost:5000 · AI: http://localhost:8000
 ```
 
-### Option B — local processes
+Set three distinct long random secrets — `JWT_SECRET`, `HMAC_SECRET`, `OFFICIAL_JWT_SECRET` — plus `CLIENT_URL` to the HTTPS origin and `OFFICIAL_COOKIE_SECURE=true` in production. First official accounts are provisioned by a controlled server-side process; there is no public official registration endpoint. See [GOVERNMENT_PORTAL.md](GOVERNMENT_PORTAL.md) and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+
+---
+
+## Data modes and honest AI labelling
+
+- `DATA_MODE=mongo` uses MongoDB and real stored reports.
+- `DATA_MODE=demo` uses an explicitly labelled in-memory demo store; the UI shows a persistent demo banner.
+- `AI_MODE=auto` uses real YOLO weights when installed, otherwise returns `demo: true`, `model.engine: "demo"` and `DEMO MODE` warnings. `AI_MODE=real` fails cleanly instead of silently substituting demo detections.
+- No trained weights ship with the repository. `MODEL_CONFIDENCE_THRESHOLD` is the configured minimum gate; AI-service and backend gates use it and administrators may raise, but not lower, the backend gate.
+- `No road damage detected.` is shown when no detection passes the configured threshold; the submission is preserved rather than fabricating a result.
+
+---
+
+## Tests & validation
 
 ```bash
-# 0. MongoDB running locally (or use DATA_MODE=demo, see below)
-make install                # installs frontend + backend + ai-service deps
-
-# 1. AI service
-cd ai-service && . .venv/bin/activate
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-
-# 2. Backend (new shell)
-cd backend && npm run dev   # reads ../.env — or: DATA_MODE=demo DEMO_SEED=true npm run dev
-
-# 3. Frontend (new shell)
-cd frontend && npm run dev  # → http://localhost:5173
+cd backend  && npm test && npm run lint && npx tsc -p tsconfig.build.json --noEmit && npm run build
+cd frontend && npm test && npm run lint && npx tsc --noEmit && npm run build
+cd ai-service && . .venv/bin/activate && ruff check app tests && python -m pytest -q
 ```
 
-The frontend proxies `/api` to the backend port configured by `PORT` in the
-repository-root `.env` (default `5000`). Set `VITE_API_URL` in the shell to
-override the proxy target. If another app is already using port `5173`, start
-the frontend on a free port, for example:
+Current suite: **backend 78 passing tests** (3 Mongo integration tests skipped without a running MongoDB), **frontend 35 passing tests**, **AI service 31 passing tests**. Security-focused suites explicitly check public/private separation, IDOR-style access, guessed IDs, direct image access, CSRF, RBAC, session expiry, production secret separation, rate limiting, malicious uploads and injection-shaped query/location payloads. A full-stack HTTP smoke script additionally verifies anonymous reporting, strict public DTOs, hidden-portal auth/CSRF/audit/logout, legacy token separation and labelled demo AI.
 
-```bash
-cd frontend && npm run dev -- --host 127.0.0.1 --port 5174 --strictPort
-# → http://localhost:5174
-```
+---
 
-**No MongoDB available?** Run the backend with `DATA_MODE=demo DEMO_SEED=true`:
-an explicitly-labelled in-memory demo store (every API response is tagged
-`meta.dataMode: "demo"` and the UI shows a permanent DEMO MODE banner). Demo
-credentials with seeded data: `demo@rdd.local` / `demo1234`.
+## Repository layout
 
-**Verify the whole stack:** `bash scripts/smoke.sh` — registers a user, runs a
-real upload → AI analysis → storage cycle and checks history, analytics, map
-and error handling.
+| Path | Purpose |
+| --- | --- |
+| `frontend/` | React/Vite citizen camera flow, public tracking and hidden operator SPA |
+| `backend/` | Express APIs, validation, repositories, auth/RBAC, storage abstraction, tests |
+| `ai-service/` | FastAPI YOLO/OpenCV inference service with labelled demo fallback |
+| `docs/` | Architecture, public API, security, security audit, AI model and deployment documentation |
+| `CITIZEN_REPORTING.md` | Camera, permissions, location, privacy and public tracking |
+| `GOVERNMENT_PORTAL.md` | Internal operator guide: provisioning, roles, auth, workflows, audit |
+| `SECURITY_AUDIT.md` | Evidence-backed final security audit and acceptance checklist |
+| `FINAL_REPORT.md` | Implementation, validation, limitations and delivery report |
+| `docker-compose.yml` | MongoDB · AI service · backend · nginx frontend |
+| `.env.example` | All configuration, including official/session, abuse and SLA settings |
 
-## Environment variables
+## Documentation boundary
 
-All variables are documented in [`.env.example`](.env.example). Highlights:
-
-| Variable | Purpose |
-|---|---|
-| `DATABASE_URL` | MongoDB connection string |
-| `JWT_SECRET` | **required in production** — auth token signing key |
-| `DATA_MODE` | `mongo` (production) or `demo` (labelled in-memory store) |
-| `AI_SERVICE_URL` | backend → AI service address |
-| `AI_MODE` | `auto` / `real` / `demo` engine selection |
-| `MODEL_PATH` | trained YOLO weights location |
-| `UPLOAD_DIRECTORY`, `MAX_UPLOAD_MB` | image storage and limits |
-| `CLIENT_URL` | CORS origin allow-list |
-
-## AI model setup
-
-The inference service has two engines behind one interface:
-
-* **Real engine** — Ultralytics YOLO on PyTorch (`ai-service/requirements-ml.txt`
-  + trained weights at `MODEL_PATH`). This is the production path.
-* **Demo engine** — deterministic image heuristics for evaluation without
-  weights; every result is flagged `demo: true` end to end.
-
-Installing real inference:
-
-```bash
-cd ai-service && . .venv/bin/activate
-pip install -r requirements.txt -r requirements-ml.txt
-cp your_trained_weights.pt models/road_damage_yolo.pt
-AI_MODE=real uvicorn app.main:app --port 8000
-curl localhost:8000/health   # expect: "engine": "yolo", "demo": false
-```
-
-No dataset or weights are bundled — see **[docs/AI_MODEL.md](docs/AI_MODEL.md)**
-for the exact contract, class configuration, severity rules, suitable public
-datasets (e.g. RDD2022) and how to plug in alternative models.
-
-## Testing
-
-```bash
-make test        # everything below
-cd backend  && npm test     # 49 tests: units + full API workflow (AI stubbed over HTTP)
-                            # + MongoDB integration (mongodb-memory-server; runs in CI)
-cd frontend && npm test     # 20 tests: components, forms, upload validation, utils
-cd ai-service && . .venv/bin/activate && python -m pytest   # 29 tests
-bash scripts/smoke.sh       # live end-to-end smoke against running services
-```
-
-Lint & type checks: `make lint` (ESLint + ruff) and `tsc` strict mode in both
-TypeScript packages.
-
-## Production build & deployment
-
-```bash
-make build       # backend tsc build + frontend vite build
-make up          # docker compose up --build
-```
-
-Deployment guide (env hardening, TLS, volumes, health checks, scaling notes):
-**[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)**. CI runs lint, tests, builds and
-Docker image builds on every push/PR (`.github/workflows/ci.yml`).
-
-## Documentation
-
-| Document | Contents |
-|---|---|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | system design, data flow, schema/indexing, testing strategy |
-| [docs/API.md](docs/API.md) | every REST endpoint + AI service contract with examples |
-| [docs/AI_MODEL.md](docs/AI_MODEL.md) | engine modes, weights installation, severity rules, datasets |
-| [docs/SECURITY.md](docs/SECURITY.md) | auth model, validation, uploads, headers, rate limits, risks |
-| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | environments, variables, Docker, production checklist |
-
-## Limitations (read this)
-
-* **No trained weights ship with the repository.** Without them the AI service
-  runs the clearly-labelled demo engine. This is a deliberate, documented
-  limitation — not hidden or faked functionality.
-* **Confidence scores are model estimates**, not guarantees of real-world
-  accuracy. **Severity is a heuristic ranking**, not a professional
-  civil-engineering assessment — always verify critical findings on site.
-* JWT sessions are stateless (no server-side revocation yet); email delivery
-  for password recovery is an integration stub; rate limiting is per-instance.
-* Demo mode stores data in memory — it resets on restart and is not for real
-  user data.
-
-## Troubleshooting
-
-See the table in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#troubleshooting) for
-common issues (AI service unreachable, database disconnected, CORS, rate
-limits, upload rejections).
+`docs/API.md` is the **public API** reference. The hidden government portal, its login route, provisioning and private endpoints are described only in `GOVERNMENT_PORTAL.md`, which is internal operator documentation and must not be published as public API docs or linked from public navigation, sitemaps or robots-indexable menus.

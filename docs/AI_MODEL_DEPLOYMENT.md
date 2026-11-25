@@ -29,3 +29,19 @@ pothole detections missed at the chosen threshold, and the repository says it
 has not been field-tested on Indian roads. Review findings manually and
 validate on representative local images before operational use. Severity
 scores in this application remain heuristic estimates.
+
+## Runtime contract in this application
+
+- `MODEL_CONFIDENCE_THRESHOLD` gates engine detections inside the FastAPI
+  prediction service; the backend applies the highest of its environment
+  baseline, any permitted administrative override and the model-reported gate.
+  Administrators may raise but never lower the backend threshold.
+- When no detection survives the gate, the response includes
+  `No road damage detected.` and the citizen report is still preserved.
+- `RawDetection.segmentation`, `Detection.segmentation` and the backend
+  `DetectionRecord.segmentation` are optional polygon points. Bounding boxes
+  remain the minimum contract; the official detail page shows a point count
+  when segmentation exists and `—` otherwise.
+- Demo output remains explicitly labelled. Real-mode inference must supply
+  versioned weights; otherwise `AI_MODE=real` fails cleanly instead of silently
+  substituting heuristic detections.

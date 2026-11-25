@@ -24,7 +24,7 @@ export function createApp(): express.Express {
 
   app.use(
     helmet({
-      crossOriginResourcePolicy: { policy: 'cross-origin' }, // images served to the SPA origin
+      crossOriginResourcePolicy: { policy: 'same-origin' },
       contentSecurityPolicy: {
         directives: {
           defaultSrc: ["'self'"],
@@ -39,17 +39,26 @@ export function createApp(): express.Express {
     }),
   );
 
+  // Only the application's own origin may request camera/geolocation. This is
+  // a browser capability boundary, NOT an authentication mechanism.
+  app.use((_req, res, next) => {
+    res.setHeader('Permissions-Policy', 'camera=(self), geolocation=(self), microphone=()');
+    next();
+  });
+
   app.use(
     cors({
       origin(origin, callback) {
-        // Allow same-origin/curl requests (no Origin header) and the SPA origins.
-        if (!origin || config.clientUrls.includes(origin)) {
-          callback(null, true);
+        // Official sessions use credentialed cookies: never use a wildcard.
+        if (!origin) {
+          callback(null, config.clientUrls[0] ?? false);
           return;
         }
-        callback(null, false);
+        callback(null, config.clientUrls.includes(origin) ? origin : false);
       },
-      credentials: false, // Bearer-token auth — no cookies, so CSRF surface is minimal
+      // Citizen auth remains Bearer-token based; official auth uses SameSite
+      // Strict, httpOnly cookies and a double-submit CSRF token.
+      credentials: true,
     }),
   );
 

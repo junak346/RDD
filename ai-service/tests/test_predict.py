@@ -33,6 +33,7 @@ def test_predict_returns_valid_schema(client, sample_image_bytes):
     for detection in body.detections:
         assert 0.0 <= detection.confidence <= 1.0
         assert detection.severity in ("low", "moderate", "high")
+        assert hasattr(detection, "segmentation"), "optional segmentation field must be in the schema"
         bbox = detection.bbox
         assert 0 <= bbox.x1 < bbox.x2 <= 320
         assert 0 <= bbox.y1 < bbox.y2 <= 240
@@ -51,6 +52,7 @@ def test_predict_clean_image_reports_no_damage(client, flat_image_bytes):
     body = PredictionResponse.model_validate(response.json())
     assert body.summary.detection_count == 0
     assert body.summary.max_severity is None
+    assert "No road damage detected." in body.warnings
 
 
 def test_predict_rejects_non_image(client):

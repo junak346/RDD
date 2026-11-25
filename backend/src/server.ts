@@ -7,6 +7,7 @@ import { createApp } from './app';
 import { config } from './config';
 import { createDemoSeed } from './repositories/memory/seed';
 import { getRepositories } from './repositories';
+import { ensureCivicBootstrap } from './services/civicBootstrap.service';
 import { logger } from './utils/logger';
 
 async function connectDatabase(): Promise<void> {
@@ -32,6 +33,7 @@ async function connectDatabase(): Promise<void> {
 
 async function main(): Promise<void> {
   await connectDatabase();
+  await ensureCivicBootstrap();
 
   const app = createApp();
   const server = app.listen(config.port, '0.0.0.0', () => {

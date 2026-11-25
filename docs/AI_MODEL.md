@@ -82,26 +82,46 @@ docker build --build-arg INSTALL_ML=true -t rdd-ai ./ai-service
 
 Everything downstream (severity, visualisation, response schema, storage) is
 engine-agnostic via the `DetectionEngine` interface (`app/models/base.py`).
+`RawDetection` may include an optional `segmentation` polygon; the prediction
+schema and backend detection record carry it as optional data. The official
+detail UI displays a point count when a segmentation model supplies one and
+shows `—` otherwise. Bounding boxes remain the universal minimum contract.
+
+### Confidence gate and no-damage language
+
+`PredictionService` filters engine outputs with
+`confidence >= settings.confidence_threshold` before severity scoring,
+summarisation, annotation and persistence. The backend applies the highest of
+its environment baseline, any permitted administrative override and the
+model-reported threshold; administrators may raise but never lower that gate.
+When nothing remains, the AI response includes `No road damage detected.` in
+warnings and the submission is preserved. No detections are fabricated to make
+a report look successful.
 
 ### Swapping in another model
 
 Implement `DetectionEngine` (two methods: `info()`, `predict()`) and register it
 in `app/models/registry.py`. Examples that fit this interface: YOLOv8/v11/v12
-variants, segmentation models (extend `RawDetection` with a mask field), ONNX /
-TensorRT runtimes, cloud vision APIs.
+variants, segmentation models (set the optional `RawDetection.segmentation`
+polygon), ONNX / TensorRT runtimes, cloud vision APIs.
 
 ## Damage classes
 
 `app/classes.json` defines the class catalogue (id, name, label, annotation
 colour, severity prior). It is **configuration, not hard-coded logic** — add or
-rename classes there and in your trained model. The initial catalogue:
+rename classes there and in your trained model. The installed RDD2022 India + Kent checkpoint catalogue (`app/classes.json`):
 
 | id | name | label | severity prior |
 |---|---|---|---|
-| 0 | `pothole` | Pothole | 1.0 |
-| 1 | `crack` | Crack | 0.7 |
-| 2 | `surface_damage` | Surface Damage | 0.55 |
-| 3 | `other` | Other | 0.4 |
+| 0 | `longitudinal_crack` | Longitudinal Crack | 0.70 |
+| 1 | `transverse_crack` | Transverse Crack | 0.70 |
+| 2 | `alligator_crack` | Alligator Crack | 0.85 |
+| 3 | `pothole` | Pothole | 1.00 |
+
+The UI class palette, AI annotations and backend filters use these names. If a
+different checkpoint is installed, update `app/classes.json` and the trained
+model's class order together; see `AI_MODEL_DEPLOYMENT.md` for the installed
+checkpoint's provenance and reported limitations.
 
 ## Severity estimation (all engines)
 
@@ -139,8 +159,8 @@ checkpoint as `road_damage_yolo.pt` and install it as described above.
 
 `app/models/demo_engine.py` computes grid-based darkness, gradient and texture
 features and maps them to damage-like boxes. It exists so the entire product —
-upload → analysis → annotated report → history → dashboard → map — can be
-evaluated end to end without weights.
+fresh camera capture → analysis → annotated report → public tracking → official
+dashboard/map/audit — can be evaluated end to end without weights.
 
 * ✅ clearly labelled everywhere (`demo: true`, warnings, UI banners)
 * ✅ deterministic and fast

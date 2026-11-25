@@ -26,6 +26,10 @@ class Detection(BaseModel):
     severity: Severity
     severity_score: float = Field(..., ge=0.0, le=1.0)
     area_ratio: float = Field(..., ge=0.0, le=1.0, description="bbox area / image area")
+    segmentation: list[list[float]] | None = Field(
+        default=None,
+        description="Optional polygon points [x, y] from a segmentation-capable model",
+    )
 
 
 class ModelInfo(BaseModel):
